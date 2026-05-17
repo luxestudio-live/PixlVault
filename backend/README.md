@@ -23,4 +23,4 @@ If Firestore startup fails with missing credentials, set `FIREBASE_SERVICE_ACCOU
 
 ## Deployment
 
-See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the AWS App Runner container flow, required backend env vars, health/readiness endpoints, and production checklist.
+See [../DEPLOYMENT.md](../DEPLOYMENT.md) for the Elastic Beanstalk source-deployment flow, required backend env vars, health/readiness endpoints, and production checklist.

@@ -6,7 +6,7 @@
 graph TD
   A[User Browser] --> B[Next.js Frontend]
   B --> C[Firebase Auth]
-  B -->|Bearer Firebase ID token| D[FastAPI Backend on AWS App Runner]
+  B -->|Bearer Firebase ID token| D[FastAPI Backend on AWS Elastic Beanstalk]
   D -->|Verify token| C
   D -->|Read/write metadata| E[Firestore]
   D -->|MTProto via Telethon| F[User's Telegram Account]

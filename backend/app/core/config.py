@@ -1,7 +1,8 @@
 from functools import lru_cache
+import json
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,26 @@ class Settings(BaseSettings):
     firestore_collection_prefix: str = Field(default="pixlvault", alias="FIRESTORE_COLLECTION_PREFIX")
     upload_temp_dir: str = Field(default="/tmp/pixlvault", alias="UPLOAD_TEMP_DIR")
     maintenance_auth_token: str | None = Field(default=None, alias="MAINTENANCE_AUTH_TOKEN")
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        if value is None:
+            return value
+
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+
+            if text.startswith("["):
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return parsed
+
+            return [origin.strip() for origin in text.split(",") if origin.strip()]
+
+        return value
 
     @model_validator(mode="after")
     def validate_deployment_settings(self) -> "Settings":

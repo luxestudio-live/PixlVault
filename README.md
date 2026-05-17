@@ -23,7 +23,7 @@ PixlVault is a private media vault that lets users sign in with Firebase Auth, l
 - Frontend: Next.js App Router, React 19, Tailwind, Framer Motion, Firebase client SDK.
 - Backend: FastAPI, Telethon, Firestore, Firebase Admin, Python 3.12.
 - Media transport: Telegram MTProto.
-- Deployment: Vercel frontend, AWS App Runner backend.
+- Deployment: Vercel frontend, AWS Elastic Beanstalk backend.
 
 ## Repository Layout
 
@@ -63,7 +63,7 @@ npm run dev
 The production target is:
 
 - Frontend: Vercel
-- Backend: AWS App Runner or a similar lightweight container host
+- Backend: AWS Elastic Beanstalk using the Python platform
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for the full deployment checklist, env var matrix, CLI flow, and smoke tests.
 

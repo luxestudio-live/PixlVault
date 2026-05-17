@@ -3,7 +3,7 @@
 ## Deployment Model
 
 - Frontend: Next.js App Router on Vercel.
-- Backend: FastAPI container on AWS App Runner, or an equivalent lightweight AWS container host.
+- Backend: FastAPI on AWS Elastic Beanstalk using the Python platform and source-based deployment.
 - Auth: Firebase Auth.
 - Metadata: Firestore.
 - Media storage: Telegram MTProto via the user's own linked Telegram account.
@@ -50,8 +50,8 @@ Optional:
 
 ## Backend Readiness
 
-- Docker image is built from `backend/Dockerfile`.
-- The container listens on `0.0.0.0` and honors `PORT` with a default of `8080`.
+- The backend uses a Python `Procfile` with `gunicorn` and `uvicorn.workers.UvicornWorker`.
+- The process binds to `0.0.0.0` and honors `PORT` with a default of `8000`.
 - Backend startup now validates production-oriented env assumptions and creates cloud-safe temp storage.
 - Logging is JSON structured and request-scoped.
 - `/health` is a liveness check and `/ready` is a readiness check.
@@ -63,7 +63,7 @@ Required:
 - `APP_ENV=production`
 - `API_V1_PREFIX=/api/v1`
 - `LOG_LEVEL=INFO`
-- `CORS_ORIGINS=["https://<your-vercel-prod-domain>","https://<your-vercel-preview-domain>"]`
+- `CORS_ORIGINS=["https://pixlvault.theluxestudio.in"]`
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
 - `TELEGRAM_SESSION_ENCRYPTION_KEY`
@@ -80,15 +80,25 @@ Optional but recommended:
 - `UPLOAD_TEMP_DIR=/tmp/pixlvault`
 - `MAINTENANCE_AUTH_TOKEN`
 
-### AWS App Runner setup flow
+### Elastic Beanstalk setup flow
 
-1. Build the image locally with `docker build -t pixlvault-backend -f backend/Dockerfile .`.
-2. Push the image to your registry of choice, such as Amazon ECR.
-3. Create an App Runner service from that image.
-4. Set the container port to `8080` unless you override `PORT`.
-5. Inject secrets and env vars at the App Runner service level or through AWS Secrets Manager references.
-6. Confirm the service can reach Firestore and Firebase Admin using the configured credentials.
-7. Point the Vercel frontend at the App Runner service URL.
+1. From `backend`, run `eb init -p python-3.12 pixlvault-backend`.
+2. Create the environment with `eb create pixlvault-backend-prod`.
+3. Set production env vars with `eb setenv ...`.
+4. Deploy with `eb deploy`.
+5. Confirm the environment URL can reach `/health` and `/ready`.
+6. Point the Vercel frontend at the Elastic Beanstalk environment URL.
+
+### EB CLI commands
+
+From the `backend` folder:
+
+```bash
+eb init -p python-3.12 pixlvault-backend
+eb create pixlvault-backend-prod
+eb setenv APP_ENV=production API_V1_PREFIX=/api/v1 LOG_LEVEL=INFO CORS_ORIGINS='["https://pixlvault.theluxestudio.in"]' TELEGRAM_API_ID=... TELEGRAM_API_HASH=... TELEGRAM_SESSION_ENCRYPTION_KEY=... FIREBASE_PROJECT_ID=... FIREBASE_SERVICE_ACCOUNT_JSON='...'
+eb deploy
+```
 
 ### Secret handling
 
@@ -98,8 +108,8 @@ Optional but recommended:
 
 ### Port handling
 
-- App Runner must expose the same port the container listens on.
-- This repository defaults to `8080` and also respects the `PORT` env var.
+- Elastic Beanstalk should launch the app through the `Procfile`.
+- The backend binds to `PORT` when provided and falls back to `8000`.
 
 ### CORS setup
 
