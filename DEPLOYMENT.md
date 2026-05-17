@@ -89,6 +89,8 @@ Optional but recommended:
 5. Confirm the environment URL can reach `/health` and `/ready`.
 6. Point the Vercel frontend at the Elastic Beanstalk environment URL.
 
+The backend bundle includes an EB health-check config that points the environment health check at `/health`.
+
 ### EB CLI commands
 
 From the `backend` folder:
