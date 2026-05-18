@@ -1,5 +1,8 @@
-
 # Elastic Beanstalk Files
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Ignore sensitive service account files
+firebase-service-account.json
+pixl-vault-firebase-adminsdk-fbsvc-ced41a1d03.json
