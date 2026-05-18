@@ -2,38 +2,69 @@ import type { MediaItem, MediaKind, MediaListPage, TelegramStatus } from '@/lib/
 import { getApiBaseUrl } from '@/lib/runtime-env';
 
 const apiBaseUrl = getApiBaseUrl();
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_UPLOAD_TIMEOUT_MS = 60000;
 
-async function authedFetch(idToken: string, path: string, init: RequestInit = {}) {
-  let response: Response;
-  try {
-    response = await fetch(`${apiBaseUrl}${path}`, {
-      ...init,
-      headers: {
-        ...(init.headers ?? {}),
-        Authorization: `Bearer ${idToken}`,
-      },
-    });
-  } catch {
-    throw new Error(`Can't reach the PixlVault API at ${apiBaseUrl}. Check that the backend is running.`);
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+async function readApiErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
+  const rawBody = await response.text().catch(() => '');
+  if (!rawBody) {
+    return fallbackMessage;
   }
+
+  try {
+    const parsed = JSON.parse(rawBody) as { message?: string; detail?: string };
+    return parsed.message ?? parsed.detail ?? fallbackMessage;
+  } catch {
+    return rawBody;
+  }
+}
+
+async function authedFetchResponse(idToken: string, path: string, init: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutHandle = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const headers = new Headers(init.headers ?? {});
+    headers.set('Authorization', `Bearer ${idToken}`);
+
+    return await fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`PixlVault API request timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    }
+
+    throw new Error(`Can't reach the PixlVault API at ${apiBaseUrl}. Check that the backend is running.`);
+  } finally {
+    globalThis.clearTimeout(timeoutHandle);
+  }
+}
+
+async function authedFetch<T>(idToken: string, path: string, init: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
+  const response = await authedFetchResponse(idToken, path, init, timeoutMs);
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => null);
-    const message = errorBody?.message ?? errorBody?.detail ?? 'Request failed';
-    throw new Error(message);
+    throw new Error(await readApiErrorMessage(response, 'Request failed'));
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 export async function fetchTelegramStatus(idToken: string): Promise<TelegramStatus> {
-  return authedFetch(idToken, '/telegram/status');
+  return authedFetch<TelegramStatus>(idToken, '/telegram/status');
 }
 
 export async function requestTelegramOtp(idToken: string, phoneNumber: string, forceResend = false, channelName?: string) {
   return authedFetch(idToken, '/telegram/request-otp', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number: phoneNumber, force_resend: forceResend, channel_name: channelName ?? null }),
   });
 }
@@ -46,7 +77,7 @@ export async function verifyTelegramOtp(
 ) {
   return authedFetch(idToken, '/telegram/verify-otp', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       challenge_id: challengeId,
       otp_code: otpCode,
@@ -56,9 +87,8 @@ export async function verifyTelegramOtp(
 }
 
 export async function unlinkTelegram(idToken: string): Promise<{ unlinked: boolean }> {
-  return authedFetch(idToken, '/telegram/link', {
+  return authedFetch<{ unlinked: boolean }>(idToken, '/telegram/link', {
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${idToken}` },
   });
 }
 
@@ -78,7 +108,7 @@ export async function listMedia(
   }
 
   const query = searchParams.toString();
-  return authedFetch(idToken, query ? `/media?${query}` : '/media');
+  return authedFetch<MediaListPage>(idToken, query ? `/media?${query}` : '/media');
 }
 
 export type MediaUploadHandle = {
@@ -100,6 +130,7 @@ export function createMediaUpload(
   const promise = new Promise<MediaItem>((resolve, reject) => {
     xhr.open('POST', `${apiBaseUrl}/media/upload`);
     xhr.setRequestHeader('Authorization', `Bearer ${idToken}`);
+    xhr.timeout = DEFAULT_UPLOAD_TIMEOUT_MS;
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable || !onProgress) {
@@ -125,8 +156,17 @@ export function createMediaUpload(
         const errorBody = JSON.parse(xhr.responseText) as { message?: string; detail?: string };
         reject(new Error(errorBody.message ?? errorBody.detail ?? 'Upload failed'));
       } catch {
-        reject(new Error('Upload failed'));
+        reject(new Error(xhr.responseText || 'Upload failed'));
       }
+    };
+
+    xhr.ontimeout = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      reject(new Error(`Upload timed out after ${Math.round(DEFAULT_UPLOAD_TIMEOUT_MS / 1000)} seconds.`));
     };
 
     xhr.onerror = () => {
@@ -169,21 +209,15 @@ export async function uploadMedia(
 }
 
 export async function fetchMediaAssetBlob(idToken: string, mediaId: string, kind: 'thumbnail' | 'content'): Promise<Blob> {
-  const response = await fetch(`${apiBaseUrl}/media/${mediaId}/${kind}`, {
-    headers: {
-      Authorization: `Bearer ${idToken}`,
-    },
-  });
+  const response = await authedFetchResponse(idToken, `/media/${mediaId}/${kind}`);
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => null);
-    const message = errorBody?.message ?? errorBody?.detail ?? 'Failed to load media asset';
-    throw new Error(message);
+    throw new Error(await readApiErrorMessage(response, 'Failed to load media asset'));
   }
 
   return await response.blob();
 }
 
 export async function fetchMediaStreamUrl(idToken: string, mediaId: string): Promise<{ stream_url: string; expires_in_seconds: number }> {
-  return authedFetch(idToken, `/media/${mediaId}/stream-url`);
+  return authedFetch<{ stream_url: string; expires_in_seconds: number }>(idToken, `/media/${mediaId}/stream-url`);
 }

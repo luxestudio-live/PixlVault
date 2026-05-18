@@ -71,7 +71,7 @@ Required:
 Firebase / Firestore:
 
 - `FIREBASE_PROJECT_ID`
-- `FIREBASE_SERVICE_ACCOUNT_JSON` or `FIREBASE_SERVICE_ACCOUNT_PATH`
+- `FIREBASE_SERVICE_ACCOUNT_PATH` for production and local development
 
 Optional but recommended:
 
@@ -105,7 +105,8 @@ eb deploy
 ### Secret handling
 
 - Prefer environment-injected secrets over checked-in files.
-- If you use `FIREBASE_SERVICE_ACCOUNT_JSON`, store the full service-account JSON in AWS Secrets Manager or an encrypted environment value.
+- Do not use `FIREBASE_SERVICE_ACCOUNT_JSON` in Elastic Beanstalk production env vars.
+- Keep the bundled Firebase JSON file restricted to the backend deployment package and filesystem path.
 - Keep Telegram API credentials and encryption keys out of the repo and out of build logs.
 
 ### Port handling

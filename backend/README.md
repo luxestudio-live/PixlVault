@@ -19,7 +19,9 @@ copy .env.example .env
 uvicorn app.main:app --reload --port 8080
 ```
 
-If Firestore startup fails with missing credentials, set `FIREBASE_SERVICE_ACCOUNT_PATH` in `backend/.env` to the absolute path of a Firebase service-account JSON file, or use Google ADC locally before starting Uvicorn.
+For local development, set `FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json` in `backend/.env` and keep the JSON file in the backend folder.
+
+For Elastic Beanstalk production deployments, use `FIREBASE_SERVICE_ACCOUNT_PATH` only. Do not inject the JSON as an environment variable.
 
 ## Deployment
 

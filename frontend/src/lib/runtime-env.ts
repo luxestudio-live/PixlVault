@@ -17,10 +17,19 @@ function requireEnv(name: string, value: string | undefined): string {
   return trimmed;
 }
 
+function normalizeApiBaseUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (trimmed.endsWith('/api/v1')) {
+    return trimmed;
+  }
+
+  return `${trimmed}/api/v1`;
+}
+
 export function getApiBaseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
   if (configured) {
-    return configured.replace(/\/$/, '');
+    return normalizeApiBaseUrl(configured);
   }
 
   if (process.env.NODE_ENV !== 'production') {
