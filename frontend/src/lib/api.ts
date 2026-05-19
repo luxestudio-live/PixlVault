@@ -5,6 +5,12 @@ const apiBaseUrl = getApiBaseUrl();
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 60000;
 
+export type TelegramOtpResponse = {
+  challenge_id: string;
+  phone_number: string;
+  expires_in_seconds: number;
+};
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -62,7 +68,7 @@ export async function fetchTelegramStatus(idToken: string): Promise<TelegramStat
 }
 
 export async function requestTelegramOtp(idToken: string, phoneNumber: string, forceResend = false, channelName?: string) {
-  return authedFetch(idToken, '/telegram/request-otp', {
+  return authedFetch<TelegramOtpResponse>(idToken, '/telegram/request-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ phone_number: phoneNumber, force_resend: forceResend, channel_name: channelName ?? null }),
