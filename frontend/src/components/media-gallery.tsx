@@ -463,6 +463,7 @@ function MediaTile({
   const [retryCount, setRetryCount] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const tileRef = useRef<HTMLButtonElement | null>(null);
+  const latestObjectUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const tile = tileRef.current;
@@ -485,14 +486,15 @@ function MediaTile({
   }, []);
 
   useEffect(() => {
-    if (!isVisible || thumbnailUrl || thumbnailLoading || thumbnailError) {
+    if (!isVisible || thumbnailUrl) {
       return;
     }
 
     let cancelled = false;
-    let objectUrl: string | null = null;
+    let didStart = false;
 
     void (async () => {
+      didStart = true;
       setThumbnailLoading(true);
       setThumbnailError(null);
 
@@ -505,7 +507,12 @@ function MediaTile({
             return;
           }
 
-          objectUrl = URL.createObjectURL(blob);
+          const objectUrl = URL.createObjectURL(blob);
+          if (latestObjectUrlRef.current) {
+            URL.revokeObjectURL(latestObjectUrlRef.current);
+          }
+
+          latestObjectUrlRef.current = objectUrl;
           setThumbnailUrl(objectUrl);
           setThumbnailError(null);
           setRetryCount(attempt - 1);
@@ -524,18 +531,24 @@ function MediaTile({
         }
       }
 
-      if (!cancelled) {
+      if (!cancelled && didStart) {
         setThumbnailLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
+    };
+  }, [isVisible, item.mediaId, item.updatedAt, thumbnailUrl, token]);
+
+  useEffect(() => {
+    return () => {
+      if (latestObjectUrlRef.current) {
+        URL.revokeObjectURL(latestObjectUrlRef.current);
+        latestObjectUrlRef.current = null;
       }
     };
-  }, [isVisible, item.mediaId, item.updatedAt, thumbnailError, thumbnailLoading, thumbnailUrl, token]);
+  }, []);
 
   const Icon = item.mediaKind === 'image' ? FileImage : item.mediaKind === 'video' ? Film : FileText;
   const isTall = index % 5 === 0 || index % 7 === 0;
