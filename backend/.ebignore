@@ -9,3 +9,6 @@ __pycache__/
 .gitignore
 Dockerfile
 README.md
+firebase-service-account.json
+pixl-vault-firebase-adminsdk*.json
+eb-instance-connect-temp*
