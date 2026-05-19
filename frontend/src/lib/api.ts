@@ -3,6 +3,7 @@ import { getApiBaseUrl } from '@/lib/runtime-env';
 
 const apiBaseUrl = getApiBaseUrl();
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+const DEFAULT_VERIFY_OTP_TIMEOUT_MS = 90000;
 const DEFAULT_UPLOAD_TIMEOUT_MS = 60000;
 
 export type TelegramOtpResponse = {
@@ -89,7 +90,7 @@ export async function verifyTelegramOtp(
       otp_code: otpCode,
       two_factor_password: twoFactorPassword || null,
     }),
-  });
+  }, DEFAULT_VERIFY_OTP_TIMEOUT_MS);
 }
 
 export async function unlinkTelegram(idToken: string): Promise<{ unlinked: boolean }> {
