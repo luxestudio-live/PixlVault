@@ -215,8 +215,20 @@ export async function uploadMedia(
   return await createMediaUpload(idToken, file, onProgress).promise;
 }
 
-export async function fetchMediaAssetBlob(idToken: string, mediaId: string, kind: 'thumbnail' | 'content'): Promise<Blob> {
-  const response = await authedFetchResponse(idToken, `/media/${mediaId}/${kind}`);
+export async function fetchMediaAssetBlob(
+  idToken: string,
+  mediaId: string,
+  kind: 'thumbnail' | 'content',
+  options: { cacheBust?: string } = {},
+): Promise<Blob> {
+  const searchParams = new URLSearchParams();
+  if (options.cacheBust) {
+    searchParams.set('v', options.cacheBust);
+  }
+
+  const query = searchParams.toString();
+  const path = query ? `/media/${mediaId}/${kind}?${query}` : `/media/${mediaId}/${kind}`;
+  const response = await authedFetchResponse(idToken, path);
 
   if (!response.ok) {
     throw new Error(await readApiErrorMessage(response, 'Failed to load media asset'));

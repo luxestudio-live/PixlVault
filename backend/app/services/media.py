@@ -22,9 +22,30 @@ from app.services.encryption import SessionCryptographer
 from app.services.firestore import FirestoreRepository
 from app.services.telegram_client import TelegramChannelInfo, TelegramService
 from app.services.thumbnail import ThumbnailService
-from app.utils.errors import TelegramNotLinkedError, TelegramSessionInvalidError, TelegramSessionMissingError, TelegramStorageChannelMissingError
+from app.utils.errors import (
+    MediaUploadTooLargeError,
+    MediaUploadValidationError,
+    TelegramNotLinkedError,
+    TelegramSessionInvalidError,
+    TelegramSessionMissingError,
+    TelegramStorageChannelMissingError,
+)
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_UPLOAD_MIME_PREFIXES = ("image/", "video/", "text/")
+ALLOWED_UPLOAD_MIME_TYPES = {
+    "application/pdf",
+    "application/json",
+    "application/zip",
+    "application/x-zip-compressed",
+    "text/csv",
+}
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".mp4", ".mov", ".mkv", ".webm",
+    ".pdf", ".txt", ".csv", ".zip", ".json",
+}
 
 
 @dataclass(slots=True)
@@ -171,22 +192,60 @@ class MediaService:
             "kind": str(payload.get("kind") or ""),
         }
 
+    def _validate_upload_input(self, upload_file: UploadFile) -> None:
+        filename = upload_file.filename or ""
+        mime_type = (upload_file.content_type or "").lower()
+        extension = Path(filename).suffix.lower()
+
+        mime_supported = bool(
+            mime_type and (
+                any(mime_type.startswith(prefix) for prefix in ALLOWED_UPLOAD_MIME_PREFIXES)
+                or mime_type in ALLOWED_UPLOAD_MIME_TYPES
+            )
+        )
+        extension_supported = extension in ALLOWED_UPLOAD_EXTENSIONS
+
+        if not mime_supported and not extension_supported:
+            raise MediaUploadValidationError(
+                "Unsupported file type. Upload images, videos, PDF, text, CSV, ZIP, or JSON files.",
+            )
+
     async def _write_upload_to_tempfile(self, upload_file: UploadFile) -> str:
         suffix = Path(upload_file.filename or "upload.bin").suffix
         temp_file = tempfile.NamedTemporaryFile(delete=False, dir=self._settings.upload_temp_dir, suffix=suffix)
         temp_file.close()
 
+        max_bytes = self._settings.upload_max_file_size_mb * 1024 * 1024
+
         def _copy() -> None:
+            bytes_written = 0
             with open(temp_file.name, "wb") as output:
                 upload_file.file.seek(0)
-                shutil.copyfileobj(upload_file.file, output)
+                while True:
+                    chunk = upload_file.file.read(1024 * 1024)
+                    if not chunk:
+                        break
 
-        await asyncio.to_thread(_copy)
-        return temp_file.name
+                    bytes_written += len(chunk)
+                    if bytes_written > max_bytes:
+                        raise MediaUploadTooLargeError(
+                            f"File exceeds upload size limit ({self._settings.upload_max_file_size_mb} MB).",
+                        )
+
+                    output.write(chunk)
+
+        try:
+            await asyncio.to_thread(_copy)
+            return temp_file.name
+        except Exception:
+            if os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
+            raise
 
     async def upload_user_media(self, user_id: str, display_name: str, upload_file: UploadFile) -> dict:
         logger = logging.getLogger(__name__)
         upload_started = time.perf_counter()
+        self._validate_upload_input(upload_file)
         log_event(logger, logging.INFO, "upload_start", "Upload started", media_kind=self._classify_media_kind(upload_file.content_type, upload_file.filename or ""))
 
         session_doc = await self._firestore.get_telegram_storage(user_id)

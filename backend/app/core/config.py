@@ -54,6 +54,7 @@ class Settings(BaseSettings):
 
     firestore_collection_prefix: str = Field(default="pixlvault", alias="FIRESTORE_COLLECTION_PREFIX")
     upload_temp_dir: str = Field(default="/tmp/pixlvault", alias="UPLOAD_TEMP_DIR")
+    upload_max_file_size_mb: int = Field(default=50, alias="UPLOAD_MAX_FILE_SIZE_MB")
     maintenance_auth_token: str | None = Field(default=None, alias="MAINTENANCE_AUTH_TOKEN")
 
     @field_validator("cors_origins", mode="before")
@@ -108,6 +109,9 @@ class Settings(BaseSettings):
 
         if self.media_stream_token_ttl_seconds <= 0:
             raise ValueError("MEDIA_STREAM_TOKEN_TTL_SECONDS must be greater than zero.")
+
+        if self.upload_max_file_size_mb <= 0:
+            raise ValueError("UPLOAD_MAX_FILE_SIZE_MB must be greater than zero.")
 
         return self
 

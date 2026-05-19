@@ -9,7 +9,27 @@ import { createMediaUpload } from '@/lib/api';
 import type { MediaItem } from '@/lib/types';
 
 const M: any = motion;
-const CONCURRENCY_OPTIONS = [1, 2, 3, 4, 5] as const;
+const CONCURRENCY_OPTIONS = [1, 2, 3] as const;
+const RECOMMENDED_BATCH_TEXT = 'Recommended: 10-20 files per batch';
+const MAX_FILES_PER_ADD = 20;
+const MAX_QUEUE_SIZE = 60;
+const MAX_FILE_SIZE_MB = 50;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const SUPPORTED_TYPE_LABEL = 'Supported: images, videos, PDF, plain text, CSV, ZIP, JSON';
+
+const ALLOWED_MIME_PREFIXES = ['image/', 'video/', 'text/'];
+const ALLOWED_EXACT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/json',
+  'application/zip',
+  'application/x-zip-compressed',
+  'text/csv',
+]);
+const ALLOWED_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif',
+  'mp4', 'mov', 'mkv', 'webm',
+  'pdf', 'txt', 'csv', 'zip', 'json',
+]);
 
 type UploadStatus = 'queued' | 'uploading' | 'success' | 'failed' | 'cancelled';
 
@@ -160,6 +180,16 @@ function makeQueueItem(file: File): UploadQueueItem {
   };
 }
 
+function isSupportedFile(file: File): boolean {
+  const mime = file.type.toLowerCase();
+  if (mime && (ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix)) || ALLOWED_EXACT_MIME_TYPES.has(mime))) {
+    return true;
+  }
+
+  const extension = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : '';
+  return Boolean(extension && ALLOWED_EXTENSIONS.has(extension));
+}
+
 function createQueueStateMessage(stats: { queued: number; uploading: number; success: number; failed: number; cancelled: number }) {
   if (stats.uploading > 0) {
     return `${stats.uploading} uploading, ${stats.queued} queued`;
@@ -190,7 +220,7 @@ export function UploadsScreen() {
   const dragDepthRef = useRef(0);
 
   const [uploadItems, setUploadItems] = useState<UploadQueueItem[]>([]);
-  const [concurrencyLimit, setConcurrencyLimit] = useState<(typeof CONCURRENCY_OPTIONS)[number]>(4);
+  const [concurrencyLimit, setConcurrencyLimit] = useState<(typeof CONCURRENCY_OPTIONS)[number]>(2);
   const [message, setMessage] = useState<string>('Drop media here or pick files to build your upload queue.');
   const [dragActive, setDragActive] = useState(false);
 
@@ -226,8 +256,49 @@ export function UploadsScreen() {
       return;
     }
 
-    setUploadItems((current) => [...current, ...files.map(makeQueueItem)]);
-    setMessage(`${files.length} file${files.length === 1 ? '' : 's'} added to the queue.`);
+    setUploadItems((current) => {
+      const availableSlots = Math.max(0, MAX_QUEUE_SIZE - current.length);
+      if (availableSlots <= 0) {
+        setMessage(`Queue limit reached (${MAX_QUEUE_SIZE}). Clear finished items before adding more.`);
+        return current;
+      }
+
+      const intake = files.slice(0, Math.min(MAX_FILES_PER_ADD, availableSlots));
+      const skippedCountByBatch = Math.max(0, files.length - intake.length);
+      const accepted: File[] = [];
+      const rejectedReasons: string[] = [];
+
+      for (const file of intake) {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+          rejectedReasons.push(`${file.name}: exceeds ${MAX_FILE_SIZE_MB} MB`);
+          continue;
+        }
+
+        if (!isSupportedFile(file)) {
+          rejectedReasons.push(`${file.name}: unsupported format`);
+          continue;
+        }
+
+        accepted.push(file);
+      }
+
+      const nextQueue = accepted.length ? [...current, ...accepted.map(makeQueueItem)] : current;
+      const details: string[] = [];
+      if (accepted.length) {
+        details.push(`${accepted.length} file${accepted.length === 1 ? '' : 's'} queued.`);
+      }
+      if (rejectedReasons.length) {
+        const sample = rejectedReasons.slice(0, 3).join(' | ');
+        const more = rejectedReasons.length > 3 ? ` (+${rejectedReasons.length - 3} more)` : '';
+        details.push(`Skipped ${rejectedReasons.length}: ${sample}${more}.`);
+      }
+      if (skippedCountByBatch > 0) {
+        details.push(`Only the first ${MAX_FILES_PER_ADD} files are accepted per add.`);
+      }
+
+      setMessage(details.join(' ') || 'No valid files were added.');
+      return nextQueue;
+    });
   }, []);
 
   const removeItem = useCallback((itemId: string) => {
@@ -391,6 +462,11 @@ export function UploadsScreen() {
             media,
           };
         });
+        try {
+          window.sessionStorage.setItem('pixlvault.galleryRefreshAfter', String(Date.now() + 1200));
+        } catch {
+          // Ignore session storage failures.
+        }
         setMessage(`${latest.file.name} uploaded to your gallery.`);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Upload failed.';
@@ -577,6 +653,9 @@ export function UploadsScreen() {
         <div className="mt-4 space-y-1 text-sm text-white/68">
           <p>{message}</p>
           <p className="text-white/48">{queueSummary}</p>
+          <p className="text-white/48">{RECOMMENDED_BATCH_TEXT}.</p>
+          <p className="text-white/48">Max file size: {MAX_FILE_SIZE_MB} MB. {SUPPORTED_TYPE_LABEL}.</p>
+          <p className="text-white/48">Uploads run in parallel. Large videos and slower networks may take a few minutes.</p>
         </div>
 
         <AnimatePresence>

@@ -59,3 +59,13 @@ class MediaRangeNotSatisfiableError(PixlVaultError):
     status_code = 416
     code = "media_range_not_satisfiable"
 
+
+class MediaUploadValidationError(PixlVaultError):
+    status_code = 400
+    code = "media_upload_validation"
+
+
+class MediaUploadTooLargeError(PixlVaultError):
+    status_code = 413
+    code = "media_upload_too_large"
+

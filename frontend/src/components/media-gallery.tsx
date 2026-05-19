@@ -10,6 +10,8 @@ import type { MediaItem, MediaKind } from '@/lib/types';
 
 const M: any = motion;
 const PAGE_SIZE = 24;
+const THUMBNAIL_RETRY_LIMIT = 3;
+const THUMBNAIL_RETRY_BASE_DELAY_MS = 800;
 
 const FILTERS: Array<{ value: MediaKind; label: string }> = [
   { value: 'all', label: 'All' },
@@ -59,6 +61,24 @@ type ReturnOverlay = {
   fromRect: ViewerReturnTransitionPayload['rect'];
   toRect: ViewerReturnTransitionPayload['rect'];
 };
+
+function readGalleryRefreshDeadline(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.sessionStorage.getItem('pixlvault.galleryRefreshAfter');
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return parsed;
+}
 
 function readStoredGalleryContext(): GalleryContextPayload | null {
   if (typeof window === 'undefined') {
@@ -124,7 +144,10 @@ export function MediaGallery({ idToken, refreshKey }: MediaGalleryProps) {
     }
 
     const restoredContext = initialStoredContextRef.current;
-    if (restoredContext?.items?.length && restoredContext.filter === filter && refreshKey === 0) {
+    const refreshDeadline = readGalleryRefreshDeadline();
+    const shouldSkipRestore = Boolean(refreshDeadline && Date.now() < refreshDeadline);
+
+    if (restoredContext?.items?.length && restoredContext.filter === filter && refreshKey === 0 && !shouldSkipRestore) {
       setLoading(false);
       return;
     }
@@ -136,6 +159,16 @@ export function MediaGallery({ idToken, refreshKey }: MediaGalleryProps) {
       setError(null);
 
       try {
+        if (refreshDeadline && Date.now() < refreshDeadline) {
+          const waitMs = Math.max(0, refreshDeadline - Date.now());
+          await new Promise((resolve) => window.setTimeout(resolve, waitMs));
+          try {
+            window.sessionStorage.removeItem('pixlvault.galleryRefreshAfter');
+          } catch {
+            // Ignore session storage failures.
+          }
+        }
+
         const page = await listMedia(idToken, { limit: PAGE_SIZE, kind: filter });
         if (cancelled) {
           return;
@@ -425,6 +458,9 @@ function MediaTile({
   reduceMotion: boolean;
 }) {
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [thumbnailLoading, setThumbnailLoading] = useState(false);
+  const [thumbnailError, setThumbnailError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const tileRef = useRef<HTMLButtonElement | null>(null);
 
@@ -449,7 +485,7 @@ function MediaTile({
   }, []);
 
   useEffect(() => {
-    if (!isVisible || thumbnailUrl) {
+    if (!isVisible || thumbnailUrl || thumbnailLoading || thumbnailError) {
       return;
     }
 
@@ -457,18 +493,39 @@ function MediaTile({
     let objectUrl: string | null = null;
 
     void (async () => {
-      try {
-        const blob = await fetchMediaAssetBlob(token, item.mediaId, 'thumbnail');
-        if (cancelled) {
-          return;
-        }
+      setThumbnailLoading(true);
+      setThumbnailError(null);
 
-        objectUrl = URL.createObjectURL(blob);
-        setThumbnailUrl(objectUrl);
-      } catch {
-        if (!cancelled) {
-          setThumbnailUrl(null);
+      for (let attempt = 1; attempt <= THUMBNAIL_RETRY_LIMIT && !cancelled; attempt += 1) {
+        try {
+          setRetryCount(attempt - 1);
+          const cacheBustKey = `${item.updatedAt ?? 'na'}-${attempt}`;
+          const blob = await fetchMediaAssetBlob(token, item.mediaId, 'thumbnail', { cacheBust: cacheBustKey });
+          if (cancelled) {
+            return;
+          }
+
+          objectUrl = URL.createObjectURL(blob);
+          setThumbnailUrl(objectUrl);
+          setThumbnailError(null);
+          setRetryCount(attempt - 1);
+          break;
+        } catch {
+          if (attempt >= THUMBNAIL_RETRY_LIMIT) {
+            if (!cancelled) {
+              setThumbnailUrl(null);
+              setThumbnailError('Thumbnail unavailable.');
+            }
+            break;
+          }
+
+          const delayMs = THUMBNAIL_RETRY_BASE_DELAY_MS * attempt;
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
+      }
+
+      if (!cancelled) {
+        setThumbnailLoading(false);
       }
     })();
 
@@ -478,7 +535,7 @@ function MediaTile({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [isVisible, item.mediaId, thumbnailUrl, token]);
+  }, [isVisible, item.mediaId, item.updatedAt, thumbnailError, thumbnailLoading, thumbnailUrl, token]);
 
   const Icon = item.mediaKind === 'image' ? FileImage : item.mediaKind === 'video' ? Film : FileText;
   const isTall = index % 5 === 0 || index % 7 === 0;
@@ -502,6 +559,7 @@ function MediaTile({
           <img src={thumbnailUrl} alt={item.filename ?? 'Media thumbnail'} className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]" loading="lazy" decoding="async" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(circle_at_top_right,rgba(75,217,172,0.2),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(126,96,255,0.18),transparent_38%)]">
+            {thumbnailLoading ? <div className="absolute inset-0 animate-pulse bg-white/10" /> : null}
             <Icon className="h-10 w-10 text-white/70" />
           </div>
         )}
@@ -515,6 +573,18 @@ function MediaTile({
         {item.mediaKind === 'video' ? (
           <div className="absolute right-3 top-3 rounded-full border border-white/15 bg-black/35 p-2 text-white/90 backdrop-blur">
             <PlayCircle className="h-4 w-4" />
+          </div>
+        ) : null}
+
+        {thumbnailLoading ? (
+          <div className="absolute bottom-3 left-3 rounded-full border border-white/10 bg-black/45 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-white/80">
+            {retryCount > 0 ? `Retry ${retryCount}/${THUMBNAIL_RETRY_LIMIT - 1}` : 'Loading'}
+          </div>
+        ) : null}
+
+        {!thumbnailLoading && thumbnailError ? (
+          <div className="absolute bottom-3 left-3 rounded-full border border-rose-300/35 bg-rose-500/20 px-2.5 py-1 text-[10px] uppercase tracking-[0.18em] text-rose-50">
+            Thumb retry failed
           </div>
         ) : null}
 
